@@ -1,0 +1,844 @@
+####Read and Encode Data 
+import pandas as pd
+def 
+get_encoded_dataset(file_path=r'C:\Users\Uzayer\PycharmProjects\pythonProject2\LatestM
+K\LatestMK\heart_disease_health_indicators_Initial.csv'):
+ # Read the dataset into a Pandas DataFrame
+ data = pd.read_csv(file_path)
+ return data
+def drop_specified_columns(data):
+#Drops a predefined set of columns from the DataFrame.
+ # Define the list of columns to drop
+ columns_to_drop = ['State', 'HIVTesting', 'FluVaxLast12', 'PneumoVaxEver',
+ 'DifficultyConcentrating', 'RaceEthnicityCategory', 
+'BlindOrVisionDifficulty',
+ 'DifficultyWalking', 'ChestScan', 'DifficultyDressingBathing',
+ 'DifficultyErrands', 'TetanusLast10Tdap', 'LastCheckupTime', 
+'RemovedTeeth']
+ # Drop the specified columns, ignoring errors for columns that don't exist
+ data = data.drop(columns=columns_to_drop, errors='ignore')
+ return data
+def encode_columns(data):
+#Encodes specified categorical columns in the DataFrame.
+#:param data: DataFrame with columns to be encoded.
+#:return: DataFrame with specified columns encoded.
+ columns_to_encode = [
+ 'HadHeartAttack', 'HadStroke', 'SmokerStatus', 'AgeCategory', 'GeneralHealth', 
+'ChestScan',
+ 'HighRiskLastYear', 'HadKidneyDisease', 'DeafOrHardOfHearing', 
+'HadSkinCancer',
+ 'HadAsthma', 'HadCOPD', 'HadArthritis', 'ECigaretteUsage', 'AlcoholDrinkers',
+ 'HadDiabetes', 'CovidPos', 'HadAngina', 'PhysicalActivities',
+ 'Sex', 'HadDepressiveDisorder']
+ for column in columns_to_encode:
+ # Check if the column exists in the DataFrame
+ if column in data.columns:
+ # Encode the categorical variable
+ data[column] = data[column].astype('category').cat.codes
+ return data
+import pandas as pd
+def add_id_column_as_first(data):
+ if 'ID' in data.columns:
+ # Move the existing 'ID' column to the first position
+ id_column = data['ID']
+ data.drop(columns=['ID'], inplace=True)
+ data.insert(0, 'ID', id_column)
+ else:
+ # Create a new 'ID' column and insert it as the first column
+ id_column = range(1, len(data) + 1)
+ data.insert(0, 'ID', id_column)
+return data
+# Display the first few rows of the DataFrame to verify the ID column
+#print(df.head())
+# Print Dataframes in a well formatted way
+from tabulate import tabulate
+def print_formatted_dataframe(df, num_rows=5, num_columns=None):
+ """
+ Print a formatted view of a pandas DataFrame using the tabulate library.
+ :param df: DataFrame to be displayed.
+ :param num_rows: Number of rows to display. Default is 5.
+ :param num_columns: Number of columns to display. Default is None, displaying all 
+columns.
+ """
+ if num_columns is not None:
+ display_df = df.iloc[:num_rows, :num_columns]
+ else:
+ display_df = df.head(num_rows)
+ print(tabulate(display_df, headers='keys', tablefmt='psql', showindex=True))
+#print_formatted_dataframe(get_encoded_dataset())
+def print_features(df):
+ for column in df.columns:
+ print(column)
+#print_features(get_encoded_dataset())
+df = get_encoded_dataset()
+df = drop_specified_columns(df)
+df = encode_columns(df)
+df = add_id_column_as_first(df)
+# Print the distribution of 'HadStroke' with counts and percentages
+had_stroke_counts = df['HadStroke'].value_counts()
+had_stroke_percentages = df['HadStroke'].value_counts(normalize=True) * 100
+had_stroke_distribution = pd.DataFrame({'Counts': had_stroke_counts, 'Percentage': 
+had_stroke_percentages})
+print("\nDistribution of 'HadStroke' in initial data set:")
+print(had_stroke_distribution)
+# Save the processed DataFrame to a CSV file
+df.to_csv('heart_disease_health_indicators_Processed.csv', index=False)
+####Subset Creation 
+import pandas as pd
+def create_stratified_subsets(data_path, class_column='HadStroke', 
+distributions=None):
+ if distributions is None:
+ distributions = {'50-50': 0.5, '60-40': 0.6, '10-90': 0.1, '90-10': 0.9}
+ # Load the dataset
+ data = pd.read_csv(data_path)
+ # Separate the two classes
+ class_0 = data[data[class_column] == 0]
+ class_1 = data[data[class_column] == 1]
+ # Determine the number of samples in the minority class (class_1)
+ n_class_1 = len(class_1)
+ # Calculate the maximum required size of the majority class across all 
+distributions
+ max_n_majority_required = int(n_class_1 * (1 / min(distributions.values()) - 1))
+ # Randomly sample this maximum number once from the majority class
+ max_sampled_majority = class_0.sample(n=max_n_majority_required, random_state=42)
+ subsets = {}
+ for dist_name, majority_ratio in distributions.items():
+ # Calculate the required size of the majority class for current distribution
+ n_majority_required = int(n_class_1 * (1 / (1 - majority_ratio) - 1))
+ # Use the first n_majority_required samples from the pre-sampled majority 
+class
+ sampled_majority = max_sampled_majority.head(n_majority_required)
+ # Concatenate the samples to create a new DataFrame
+ subset = pd.concat([class_1, sampled_majority])
+ # Save the new subset DataFrame to a CSV file
+ save_path_subset = f'Subset_{dist_name}.csv'
+ subset.to_csv(save_path_subset, index=False)
+ # Store the subset DataFrame and its path for later use
+ subsets[dist_name] = (subset, save_path_subset)
+ return subsets
+def print_class_distribution(df, class_column):
+ class_counts = df[class_column].value_counts()
+ print("Class Distribution:")
+ print(class_counts)
+# Example usage
+data_path = 'Updated_DataSet.csv'
+subsets = create_stratified_subsets(data_path, 'HadStroke')
+# Print class distribution for each subset
+for dist_name, (subset_df, subset_path) in subsets.items():
+ print(f"\nSubset: {dist_name} - File: {subset_path}")
+ print_class_distribution(subset_df, 'HadStroke')
+####Random Forest
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report, confusion_matrix
+from tqdm import tqdm
+def train_random_forest_and_evaluate(data_path, id_column, subset_name):
+ # Load the dataset
+ data = pd.read_csv(data_path)
+ # Separate ID column
+ ids = data[id_column]
+ # Drop specified columns
+ data.drop(columns=id_column, inplace=True, errors='ignore')
+ # Separate features and target variable
+ X = data.drop('HadStroke', axis=1)
+ y = data['HadStroke']
+ # Split the dataset into training and testing sets
+ X_train, X_test, y_train, y_test, ids_train, ids_test = train_test_split(X, y, 
+ids, test_size=0.2, random_state=42)
+ # Initialize the Random Forest classifier
+ model = RandomForestClassifier(n_estimators=100, random_state=42)
+ # Train the model with a progress bar
+ with tqdm(total=100, desc=f"Training Random Forest for {subset_name}") as pbar:
+ model.fit(X_train, y_train)
+ pbar.update(100)
+ # Predict on test data
+ y_pred = model.predict(X_test)
+ # Save the test data with predictions and IDs
+ test_results = pd.DataFrame({'ID': ids_test}).reset_index(drop=True)
+ test_results = pd.concat([test_results, X_test.reset_index(drop=True)], axis=1)
+ test_results['RF'] = y_pred
+ # Store and write data for specified subsets
+ if subset_name in ['50-50', '60-40', '10-90']:
+ subset_data = test_results[['ID', 'RF']]
+ subset_save_path = f"RFSubsetPredictions_{subset_name}_MK.csv"
+ subset_data.to_csv(subset_save_path, index=False)
+ else:
+ test_results.to_csv(f"RFTestPredictions_{subset_name}.csv", index=False)
+ # Print the confusion matrix and classification report
+ print(f"\nResults for {subset_name}:")
+ print(confusion_matrix(y_test, y_pred))
+ print(classification_report(y_test, y_pred))
+ # Feature importance
+ feature_importances = pd.DataFrame(model.feature_importances_,
+ index = X_train.columns,
+columns=['importance']).sort_values('importance', ascending=False)
+ print(feature_importances)
+# Define your datasets and subset names
+subset_names = ['50-50', '60-40', '10-90', '90-10']
+datasets = {
+ '50-50': 'Subset_50-50.csv',
+ '60-40': 'Subset_60-40.csv',
+ '10-90': 'Subset_10-90.csv',
+ '90-10': 'Subset_90-10.csv'
+}
+# ID column name
+id_column = 'ID'
+# Train and evaluate a Random Forest model for each subset
+for subset_name in subset_names:
+ data_path = f"{datasets[subset_name]}"
+ train_random_forest_and_evaluate(data_path, id_column, subset_name)
+####Logistic Regression 
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report, confusion_matrix
+from tqdm import tqdm
+import os
+def train_logistic_regression(data_path, columns_to_drop, test_save_path):
+ # Load the dataset
+ data = pd.read_csv(data_path)
+ # Drop specified columns
+ data.drop(columns=columns_to_drop, inplace=True, errors='ignore')
+ # Separate features and target variable
+ X = data.drop('HadStroke', axis=1)
+ y = data['HadStroke']
+ # Split the dataset into training and testing sets
+ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, 
+random_state=42)
+ # Initialize logistic regression model
+ model = LogisticRegression(max_iter=1000)
+ # Train the model
+ for _ in tqdm(range(100)):
+ model.fit(X_train, y_train)
+ # Predict on test data
+ y_pred = model.predict(X_test)
+ # Save the test data with predictions
+ X_test_with_pred = X_test.copy()
+ X_test_with_pred['HadStroke'] = y_test
+ X_test_with_pred['LR'] = y_pred
+ X_test_with_pred.to_csv(test_save_path, index=False)
+ # Print the confusion matrix
+ '''conf_matrix = confusion_matrix(y_test, y_pred)
+ print(f"Confusion Matrix for {data_path}:")
+ print(conf_matrix)'''
+# Print the confusion matrix
+ conf_matrix = confusion_matrix(y_test, y_pred)
+ subset_name = os.path.splitext(os.path.basename(data_path))[0]
+ print(f"Training logistic Regression for {subset_name}")
+ print(f"\nResults for {subset_name}:")
+ print(conf_matrix)
+ # Print classification report
+ class_report = classification_report(y_test, y_pred, output_dict=False)
+ #print(f"Classification Report for {data_path}:")
+ print(class_report)
+ # Feature importance (coefficients)
+ feature_importance = model.coef_[0]
+ features = X.columns
+ feature_scores = pd.DataFrame(list(zip(features, feature_importance)), 
+columns=['Feature', 'Coefficient'])
+ print(f"Feature Importances for {subset_name}:")
+ print(feature_scores.sort_values(by='Coefficient', ascending=False))
+# List of dataset paths
+datasets = [
+ 'C:\\Users\\Uzayer\\PycharmProjects\\pythonProject2\\Latest\\Subset_50-50.csv',
+ 'C:\\Users\\Uzayer\\PycharmProjects\\pythonProject2\\Latest\\Subset_60-40.csv',
+ 'C:\\Users\\Uzayer\\PycharmProjects\\pythonProject2\\Latest\\Subset_10-90.csv',
+ 'C:\\Users\\Uzayer\\PycharmProjects\\pythonProject2\\Latest\\Subset_90-10.csv'
+]
+# Columns to drop
+columns_to_drop = ['ID', 'State', 'HIVTesting', 'FluVaxLast12', 'PneumoVaxEver',
+ 'DifficultyConcentrating', 'RaceEthnicityCategory', 
+'BlindOrVisionDifficulty',
+ 'DifficultyWalking', 'ChestScan', 'DifficultyDressingBathing', 
+'DifficultyErrands',
+ 'TetanusLast10Tdap', 'LastCheckupTime', 'RemovedTeeth']
+# Train logistic regression models on each dataset and print results
+for data_path in datasets:
+ test_save_path = data_path.replace('.csv', 'LR_TestPredictions.csv')
+ train_logistic_regression(data_path, columns_to_drop, test_save_path)
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report, confusion_matrix
+from tqdm import tqdm
+import os
+def train_logistic_regression(data_path, columns_to_drop, test_save_path):
+ # Load the dataset
+ data = pd.read_csv(data_path)
+ # Drop specified columns
+ data.drop(columns=columns_to_drop, inplace=True, errors='ignore')
+ # Separate features and target variable
+ X = data.drop('HadStroke', axis=1)
+ y = data['HadStroke']
+ # Split the dataset into training and testing sets
+ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, 
+ # Initialize logistic regression model
+ model = LogisticRegression(max_iter=1000)
+ # Train the model
+ for _ in tqdm(range(100)):
+ model.fit(X_train, y_train)
+ # Predict on test data
+ y_pred = model.predict(X_test)
+ # Save the test data with predictions
+ X_test_with_pred = X_test.copy()
+ X_test_with_pred['HadStroke'] = y_test
+ X_test_with_pred['LR'] = y_pred
+ X_test_with_pred.to_csv(test_save_path, index=False)
+ # Print the confusion matrix
+ '''conf_matrix = confusion_matrix(y_test, y_pred)
+ print(f"Confusion Matrix for {data_path}:")
+ print(conf_matrix)'''
+ # Print the confusion matrix
+ conf_matrix = confusion_matrix(y_test, y_pred)
+ subset_name = os.path.splitext(os.path.basename(data_path))[0]
+ print(f"Training logistic Regression for {subset_name}")
+ print(f"\nResults for {subset_name}:")
+ print(conf_matrix)
+ # Print classification report
+ class_report = classification_report(y_test, y_pred, output_dict=False)
+ #print(f"Classification Report for {data_path}:")
+ print(class_report)
+ # Feature importance (coefficients)
+ feature_importance = model.coef_[0]
+ features = X.columns
+ feature_scores = pd.DataFrame(list(zip(features, feature_importance)), 
+columns=['Feature', 'Coefficient'])
+ print(f"Feature Importances for {subset_name}:")
+ print(feature_scores.sort_values(by='Coefficient', ascending=False))
+# List of dataset paths
+datasets = [
+ 'C:\\Users\\Uzayer\\PycharmProjects\\pythonProject2\\Latest\\Subset_50-50.csv',
+ 'C:\\Users\\Uzayer\\PycharmProjects\\pythonProject2\\Latest\\Subset_60-40.csv',
+ 'C:\\Users\\Uzayer\\PycharmProjects\\pythonProject2\\Latest\\Subset_10-90.csv',
+ 'C:\\Users\\Uzayer\\PycharmProjects\\pythonProject2\\Latest\\Subset_90-10.csv'
+]
+# Columns to drop
+columns_to_drop = ['ID', 'State', 'HIVTesting', 'FluVaxLast12', 'PneumoVaxEver',
+ 'DifficultyConcentrating', 'RaceEthnicityCategory', 
+'BlindOrVisionDifficulty',
+ 'DifficultyWalking', 'ChestScan', 'DifficultyDressingBathing', 
+'DifficultyErrands',
+ 'TetanusLast10Tdap', 'LastCheckupTime', 'RemovedTeeth']
+# Train logistic regression models on each dataset and print results
+for data_path in datasets:
+ test_save_path = data_path.replace('.csv', 'LR_TestPredictions.csv')
+ train_logistic_regression(data_path, columns_to_drop, test_save_path)
+####Naïve Bayes 
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.naive_bayes import GaussianNB # Import GaussianNB for Naive Bayes
+from sklearn.metrics import classification_report, confusion_matrix
+from tqdm import tqdm
+# Function to train Naive Bayes and evaluate it
+def train_naive_bayes_and_evaluate(data_path, columns_to_drop, subset_name):
+ # Load the dataset
+ data = pd.read_csv(data_path)
+ # Drop specified columns
+ data.drop(columns=columns_to_drop, inplace=True, errors='ignore')
+ # Separate features and target variable
+ X = data.drop('HadStroke', axis=1)
+ y = data['HadStroke']
+ # Split the dataset into training and testing sets
+ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, 
+random_state=42)
+ # Initialize the Naive Bayes classifier
+ model = GaussianNB()
+ # Train the model with a progress bar
+ with tqdm(total=100, desc=f"Training Naive Bayes for {subset_name}") as pbar:
+ model.fit(X_train, y_train)
+ pbar.update(100)
+ # Predict on test data
+ y_pred = model.predict(X_test)
+ # Save the test data with predictions
+ test_results = X_test.copy()
+ test_results['HadStroke'] = y_test
+ test_results['NB'] = y_pred
+ test_save_path = f"TestPredictions_NaiveBayes_{subset_name}.csv"
+ test_results.to_csv(test_save_path, index=False)
+ # Print the confusion matrix and classification report
+ print(f"\nConfusion Matrix for {subset_name}:")
+ print(confusion_matrix(y_test, y_pred))
+ print(f"\nClassification Report for {subset_name}:")
+ print(classification_report(y_test, y_pred))
+ # Note: Naive Bayes does not have feature importances like Decision Trees
+ # If you need to evaluate feature importances, consider another method
+# Define your datasets and subset names
+subset_names = ['50-50', '60-40', '10-90', '90-10']
+datasets = {
+ '50-50': 'Subset_50-50.csv',
+ '60-40': 'Subset_60-40.csv',
+ '10-90': 'Subset_10-90.csv',
+ '90-10': 'Subset_90-10.csv'
+}
+# Columns to drop
+columns_to_drop = ['ID', 'State', 'HIVTesting', 'FluVaxLast12', 'PneumoVaxEver',
+ 'DifficultyConcentrating', 'RaceEthnicityCategory', 
+'BlindOrVisionDifficulty',
+'DifficultyWalking', 'ChestScan', 'DifficultyDressingBathing', 
+'DifficultyErrands',
+ 'TetanusLast10Tdap', 'LastCheckupTime', 'RemovedTeeth']
+# Train and evaluate a Naive Bayes model for each subset
+for subset_name in subset_names:
+ data_path = 
+f"C:/Users/Uzayer/PycharmProjects/pythonProject2/Latest/{datasets[subset_name]}"
+ train_naive_bayes_and_evaluate(data_path, columns_to_drop, subset_name)
+####Decision Tree 
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import classification_report, confusion_matrix
+from tqdm import tqdm
+# Function to train Decision Tree and evaluate it
+def train_decision_tree_and_evaluate(data_path, id_column, subset_name):
+ # Load the dataset
+ data = pd.read_csv(data_path)
+ # Separate ID column
+ ids = data[id_column]
+ # Drop specified columns
+ data.drop(columns=id_column, inplace=True, errors='ignore')
+ # Separate features and target variable
+ X = data.drop('HadStroke', axis=1)
+ y = data['HadStroke']
+ # Split the dataset into training and testing sets
+ X_train, X_test, y_train, y_test, ids_train, ids_test = train_test_split(X, y, 
+ids, test_size=0.2, random_state=42)
+ # Initialize the Decision Tree classifier
+ model = DecisionTreeClassifier(random_state=42)
+ # Train the model with a progress bar
+ with tqdm(total=100, desc=f"Training Decision Tree for {subset_name}") as pbar:
+ model.fit(X_train, y_train)
+ pbar.update(100)
+ # Predict on test data
+ y_pred = model.predict(X_test)
+ # Save the test data with predictions and IDs
+ test_results = pd.DataFrame({'ID': ids_test}).reset_index(drop=True)
+ test_results = pd.concat([test_results, X_test.reset_index(drop=True)], axis=1)
+ test_results['HadStroke'] = y_test.reset_index(drop=True)
+ test_results['DT'] = y_pred
+ test_save_path = f"TestPredictions_DecisionTree_{subset_name}.csv"
+ test_results.to_csv(test_save_path, index=False)
+ # Store and write 90:10 subset data if applicable
+ if subset_name == '90-10':
+ subset_90_10_data = test_results[['ID', 'HadStroke', 'DT']]
+ subset_90_10_save_path = 'Subset_90-10_Predictions_MK.csv'
+ subset_90_10_data.to_csv(subset_90_10_save_path, index=False)
+ # Print the confusion matrix and classification report
+print(f"\nConfusion Matrix for {subset_name}:")
+ print(confusion_matrix(y_test, y_pred))
+ print(f"\nClassification Report for {subset_name}:")
+ print(classification_report(y_test, y_pred))
+ # Feature importance
+ feature_importances = pd.DataFrame(model.feature_importances_,
+ index=X_train.columns,
+columns=['importance']).sort_values('importance', ascending=False)
+ feature_importance_save_path = 
+f"FeatureImportances_DecisionTree_{subset_name}.csv"
+ feature_importances.to_csv(feature_importance_save_path)
+ print(f"\nFeature Importances for {subset_name}:")
+ print(feature_importances)
+# Define your datasets and subset names
+subset_names = ['50-50', '60-40', '10-90', '90-10']
+datasets = {
+ '50-50': 'Subset_50-50.csv',
+ '60-40': 'Subset_60-40.csv',
+ '10-90': 'Subset_10-90.csv',
+ '90-10': 'Subset_90-10.csv'
+}
+# ID column name
+id_column = 'ID'
+# Train and evaluate a Decision Tree model for each subset
+for subset_name in subset_names:
+ data_path = f"{datasets[subset_name]}"
+ train_decision_tree_and_evaluate(data_path, id_column, subset_name)
+ ####Ensemble Stacking 
+ import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.naive_bayes import GaussianNB
+def create_subsets(data, class_column, distributions):
+ subsets = {}
+ class_0 = data[data[class_column] == 0]
+ class_1 = data[data[class_column] == 1]
+ n_class_1 = len(class_1)
+ for name, ratio in distributions.items():
+ n_majority = int(n_class_1 * (1 / (1 - ratio) - 1))
+ sampled_majority = class_0.sample(n=n_majority, random_state=42)
+ subset = pd.concat([sampled_majority, class_1])
+ subsets[name] = subset
+ return subsets
+# Load the dataset
+data = pd.read_csv('heart_disease_health_indicators_Initial.csv')
+distributions = {'50-50': 0.5, '60-40': 0.6, '10-90': 0.1, '90-10': 0.9}
+subsets = create_subsets(data, 'HadStroke', distributions)
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier
+models = {}
+for name, subset in subsets.items():
+X = subset.drop('HadStroke', axis=1)
+ y = subset['HadStroke']
+ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, 
+random_state=42)
+ # Random Forest, logistic Regression and Naive Bayes
+ rf = RandomForestClassifier(random_state=42).fit(X_train, y_train)
+ #dt = DecisionTreeClassifier(random_state=42).fit(X_train, y_train)
+ #lr= LogisticRegression(random_state=42).fit(X_train, y_train)
+ nb= GaussianNB().fit(X_train, y_train)
+ models[name] = {
+ 'random_forest': rf,
+ #'decision_tree': dt,
+ #'logistic_regression': lr,
+ 'naive_bayes': nb
+ }
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import classification_report, confusion_matrix
+# Prepare the new DataFrame for stacking
+stacking_df = pd.DataFrame()
+# Ensure that X_stack is from the original data for each model's predictions
+X_original = data.drop('HadStroke', axis=1)
+for name, model_dict in models.items():
+ stacking_df[f'rf_{name}'] = 
+model_dict['random_forest'].predict_proba(X_original)[:, 1]
+ #stacking_df[f'dt_{name}'] = 
+model_dict['decision_tree'].predict_proba(X_original)[:, 1]
+ #stacking_df[f'lr_{name}'] = 
+model_dict['logistic_regression'].predict_proba(X_original)[:, 1]
+ stacking_df[f'nb_{name}'] = model_dict['naive_bayes'].predict_proba(X_original)[:, 
+1]
+stacking_df['HadStroke'] = data['HadStroke']
+# Split for meta-classifier training
+X_meta = stacking_df.drop('HadStroke', axis=1)
+y_meta = stacking_df['HadStroke']
+X_meta_train, X_meta_test, y_meta_train, y_meta_test = train_test_split(X_meta, 
+y_meta, test_size=0.3, random_state=42)
+# Neural Network as Meta-classifier
+meta_classifier = MLPClassifier(random_state=42, max_iter=1000).fit(X_meta_train, 
+y_meta_train)
+meta_predictions = meta_classifier.predict(X_meta_test)
+# Calculate and print accuracy
+accuracy = (meta_predictions == y_meta_test.values).mean()
+print(f"Accuracy: {accuracy * 100:.2f}%")
+# Evaluation
+print("Confusion Matrix:")
+print(confusion_matrix(y_meta_test, meta_predictions))
+print("\nClassification Report:")
+print(classification_report(y_meta_test, meta_predictions))
+####Validation
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.naive_bayes import GaussianNB
+def create_subsets(data, class_column, distributions):
+ subsets = {}
+ class_0 = data[data[class_column] == 0]
+ class_1 = data[data[class_column] == 1]
+ n_class_1 = len(class_1)
+ for name, ratio in distributions.items():
+ n_majority = int(n_class_1 * (1 / (1 - ratio) - 1))
+ if n_majority > len(class_0):
+ print(f"Warning: Requested {n_majority} samples, but only {len(class_0)}
+available. Using replacement.")
+ sampled_majority = class_0.sample(n=n_majority, replace=True, 
+random_state=42)
+ else:
+ sampled_majority = class_0.sample(n=n_majority, random_state=42)
+ subset = pd.concat([sampled_majority, class_1])
+ subsets[name] = subset
+ return subsets
+# Load the dataset
+data = 
+pd.read_csv('C:\\Users\\Uzayer\\PycharmProjects\\pythonProject2\\LatestMK\\LatestMK\\S
+ubSet.csv') #Unseen data set
+distributions = {'50-50': 0.5, '60-40': 0.6, '10-90': 0.1, '90-10': 0.9}
+subsets = create_subsets(data, 'HadStroke', distributions)
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier
+models = {}
+for name, subset in subsets.items():
+ X = subset.drop('HadStroke', axis=1)
+ y = subset['HadStroke']
+ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, 
+random_state=42)
+ # Random Forest, logistic Regression and Naive Bayes
+ rf = RandomForestClassifier(random_state=42).fit(X_train, y_train)
+ dt = DecisionTreeClassifier(random_state=42).fit(X_train, y_train)
+ lr= LogisticRegression(random_state=42).fit(X_train, y_train)
+ nb= GaussianNB().fit(X_train, y_train)
+ models[name] = {
+ 'random_forest': rf,
+ 'decision_tree': dt,
+ 'logistic_regression': lr,
+ 'naive_bayes': nb
+ }
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import classification_report, confusion_matrix
+# Prepare the new DataFrame for stacking
+stacking_df = pd.DataFrame()
+# Ensure that X_stack is from the original data for each model's predictions
+X_original = data.drop('HadStroke', axis=1)
+for name, model_dict in models.items():
+ stacking_df[f'rf_{name}'] = 
+model_dict['random_forest'].predict_proba(X_original)[:, 1]
+ stacking_df[f'dt_{name}'] = 
+model_dict['decision_tree'].predict_proba(X_original)[:, 1]
+ stacking_df[f'lr_{name}'] = 
+model_dict['logistic_regression'].predict_proba(X_original)[:, 1]
+ stacking_df[f'nb_{name}'] = model_dict['naive_bayes'].predict_proba(X_original)[:, 
+1]
+stacking_df['HadStroke'] = data['HadStroke']
+# Split for meta-classifier training
+X_meta = stacking_df.drop('HadStroke', axis=1)
+y_meta = stacking_df['HadStroke']
+X_meta_train, X_meta_test, y_meta_train, y_meta_test = train_test_split(X_meta, 
+y_meta, test_size=0.3, random_state=42)
+# Neural Network as Meta-classifier
+meta_classifier = MLPClassifier(random_state=42, max_iter=1000).fit(X_meta_train, 
+y_meta_train)
+meta_predictions = meta_classifier.predict(X_meta_test)
+# Calculate and print accuracy
+accuracy = (meta_predictions == y_meta_test.values).mean()
+print(f"Accuracy: {accuracy * 100:.2f}%")
+# Evaluation
+print("Confusion Matrix:")
+print(confusion_matrix(y_meta_test, meta_predictions))
+print("\nClassification Report:")
+print(classification_report(y_meta_test, meta_predictions))
+####Likelihood Calculation
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import classification_report, confusion_matrix
+# Function to create stratified subsets
+def create_subsets(data, class_column, distributions):
+ subsets = {}
+ class_0 = data[data[class_column] == 0]
+ class_1 = data[data[class_column] == 1]
+ n_class_1 = len(class_1)
+ for name, ratio in distributions.items():
+ n_majority = int(n_class_1 * (1 / (1 - ratio) - 1))
+ sampled_majority = class_0.sample(n=n_majority, random_state=42)
+ subset = pd.concat([sampled_majority, class_1])
+ subsets[name] = subset
+ return subsets
+# Load the dataset
+data = pd.read_csv('heart_disease_health_indicators_Initial.csv')
+distributions = {'50-50': 0.5, '60-40': 0.6, '10-90': 0.1, '90-10': 0.9}
+subsets = create_subsets(data, 'HadStroke', distributions)
+# Train base models
+models = {}
+for name, subset in subsets.items():
+ X = subset.drop('HadStroke', axis=1)
+ y = subset['HadStroke']
+ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, 
+random_state=42)
+ rf = RandomForestClassifier(random_state=42).fit(X_train, y_train)
+ #dt = DecisionTreeClassifier(random_state=42).fit(X_train, y_train)
+ lr = LogisticRegression(random_state=42).fit(X_train, y_train)
+ nb = GaussianNB().fit(X_train, y_train)
+ models[name] = {'random_forest': rf, '''decision_tree': dt,''' 
+'logistic_regression': lr, 'naive_bayes': nb}
+# Prepare the new DataFrame for stacking
+stacking_df = pd.DataFrame()
+X_original = data.drop('HadStroke', axis=1)
+'''for name, model_dict in models.items():
+ stacking_df[f'rf_{name}'] = 
+model_dict['random_forest'].predict_proba(X_original)[:, 1]
+ #stacking_df[f'dt_{name}'] = 
+model_dict['decision_tree'].predict_proba(X_original)[:, 1]
+ stacking_df[f'lr_{name}'] = 
+model_dict['logistic_regression'].predict_proba(X_original)[:, 1]
+ stacking_df[f'nb_{name}'] = model_dict['naive_bayes'].predict_proba(X_original)[:, 
+1]'''
+for name, model_dict in models.items():
+ if 'random_forest' in model_dict:
+ stacking_df[f'rf_{name}'] = 
+model_dict['random_forest'].predict_proba(X_original)[:, 1]
+ if 'logistic_regression' in model_dict:
+ stacking_df[f'lr_{name}'] = 
+model_dict['logistic_regression'].predict_proba(X_original)[:, 1]
+ if 'naive_bayes' in model_dict:
+ stacking_df[f'nb_{name}'] = 
+model_dict['naive_bayes'].predict_proba(X_original)[:, 1]
+stacking_df['HadStroke'] = data['HadStroke']
+# Split for meta-classifier training
+X_meta = stacking_df.drop('HadStroke', axis=1)
+y_meta = stacking_df['HadStroke']
+X_meta_train_val, X_meta_test, y_meta_train_val, y_meta_test = 
+train_test_split(X_meta, y_meta, test_size=0.3,
+
+random_state=42)
+X_meta_train, X_meta_val, y_meta_train, y_meta_val = 
+train_test_split(X_meta_train_val, y_meta_train_val, test_size=0.2,
+ random_state=42)
+# Neural Network as Meta-classifier
+meta_classifier = MLPClassifier(random_state=42, max_iter=1, warm_start=True)
+# Training with validation and early stopping
+best_val_score = 0
+patience, max_patience = 0, 10
+for epoch in range(5000):
+ meta_classifier.fit(X_meta_train, y_meta_train)
+ val_predictions = meta_classifier.predict(X_meta_val)
+ val_accuracy = (val_predictions == y_meta_val.values).mean()
+ print(f"Epoch {epoch + 1}, Validation Accuracy: {val_accuracy * 100:.2f}%")
+ if val_accuracy > best_val_score:
+ best_val_score = val_accuracy
+ patience = 0
+ else:
+ patience += 1
+ if patience >= max_patience:
+ print("Early stopping triggered.")
+ break
+# Test set evaluation
+meta_probabilities = meta_classifier.predict_proba(X_meta_test)
+meta_predictions = (meta_probabilities[:, 1] >= 0.5).astype(int)
+accuracy = (meta_predictions == y_meta_test.values).mean()
+print(f"Test Accuracy: {accuracy * 100:.2f}%")
+print("Confusion Matrix:")
+print(confusion_matrix(y_meta_test, meta_predictions))
+print("\nClassification Report:")
+print(classification_report(y_meta_test, meta_predictions))
+# Printing the likelihoods for each prediction
+print("\nPredicted Likelihoods:")
+for i, (prob_0, prob_1) in enumerate(meta_probabilities):
+ print(f"Data point {i + 1} - Likelihood of Class 0: {prob_0:.2f}, Likelihood of 
+Class 1 (HadStroke): {prob_1:.2f}")
+
+####Likelihood Category 
+import pandas as pd
+from sklearn.cluster import KMeans
+import numpy as np
+# Load data
+df = pd.read_csv(r'C:\Users\Uzayer\Desktop\Munia\likelihood_Stroke_Data.csv')
+# Remove NaN values and separate out the no risk scores
+df_non_zero = df.dropna(subset=['Likelihood_of_Class_1_having_Stroke'])
+df_non_zero = df_non_zero[df_non_zero['Likelihood_of_Class_1_having_Stroke'] > 0]
+# Apply KMeans only to non-zero values
+kmeans = KMeans(n_clusters=3, 
+random_state=0).fit(df_non_zero['Likelihood_of_Class_1_having_Stroke'].values.reshape(
+-1, 1))
+df_non_zero['Cluster'] = kmeans.labels_
+# Get the cluster centers and sort them
+centers = np.sort(kmeans.cluster_centers_.flatten())
+# Function to assign risk categories based on k-means clusters
+def categorize(score, centers):
+ if score == 0:
+ return 'No risk'
+ elif score <= centers[0]:
+return 'Low risk'
+ elif score <= centers[1]:
+ return 'Medium risk'
+ elif score <= centers[2]:
+ return 'High risk'
+ else:
+ return 'Very High risk'
+# Apply the function to the non-zero dataframe
+df_non_zero['Risk_Category'] = 
+df_non_zero['Likelihood_of_Class_1_having_Stroke'].apply(lambda x: categorize(x, 
+centers))
+# Now, append the 'No risk' scores back to the dataframe
+df_zero = df[df['Likelihood_of_Class_1_having_Stroke'] == 0]
+df_zero['Risk_Category'] = 'No risk'
+df_final = pd.concat([df_non_zero, df_zero], ignore_index=True)
+# Calculate the summary statistics
+summary_df = df_final['Risk_Category'].value_counts().rename_axis('Risk 
+Category').reset_index(name='Number')
+summary_df['Considered threshold'] = ['N/A', centers[0], centers[1], centers[2], 
+'N/A'] # N/A for No risk and Very High risk
+# Show the summary dataframe
+print(summary_df)
+# Save the detailed dataframe to a CSV file
+df.to_csv(r'C:\Users\Uzayer\Desktop\Munia\categorized_risk_scores.csv', index=False)
+# Save the summary dataframe to a CSV file
+summary_df.to_csv(r'C:\Users\Uzayer\Desktop\Munia\risk_category_summary.csv', 
+
+####Odds Ratio Calculation
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report, confusion_matrix
+from statsmodels.stats.contingency_tables import Table2x2
+from tqdm import tqdm
+def calculate_odds_ratio(y_true, feature_values):
+ # Construct a 2x2 contingency table
+ contingency_table = pd.crosstab(index=y_true, columns=feature_values)
+ # Create a Table2x2 object
+ table = Table2x2(contingency_table)
+ # Get odds ratio and p-value
+ odds_ratio = table.oddsratio
+ p_value = table.test_nominal_association().pvalue
+ return odds_ratio, p_value
+def train_random_forest_and_evaluate(data_path, id_column, subset_name):
+ # Load the dataset
+ data = pd.read_csv(data_path)
+ # Separate ID column
+ ids = data[id_column]
+# Drop specified columns
+ data.drop(columns=id_column, inplace=True, errors='ignore')
+ # Separate features and target variable
+ X = data.drop('HadStroke', axis=1)
+ y = data['HadStroke']
+ # Split the dataset into training and testing sets
+ X_train, X_test, y_train, y_test, ids_train, ids_test = train_test_split(X, y, 
+ids, test_size=0.2, random_state=42)
+ # Initialize the Random Forest classifier
+ model = RandomForestClassifier(n_estimators=100, random_state=42)
+ # Train the model with a progress bar
+ with tqdm(total=100, desc=f"Training Random Forest for {subset_name}") as pbar:
+ model.fit(X_train, y_train)
+ pbar.update(100)
+ # Predict on test data
+ y_pred = model.predict(X_test)
+ # Save the test data with predictions and IDs
+ test_results = pd.DataFrame({'ID': ids_test}).reset_index(drop=True)
+ test_results = pd.concat([test_results, X_test.reset_index(drop=True)], axis=1)
+ test_results['RF'] = y_pred
+ # Store and write data for specified subsets
+ if subset_name in ['50-50', '60-40', '10-90']:
+ subset_data = test_results[['ID', 'RF']]
+ subset_save_path = f"RFSubsetPredictions_{subset_name}_MK.csv"
+ subset_data.to_csv(subset_save_path, index=False)
+ else:
+ test_results.to_csv(f"RFTestPredictions_{subset_name}.csv", index=False)
+ # Print the confusion matrix and classification report
+ print(f"\nResults for {subset_name}:")
+ print(confusion_matrix(y_test, y_pred))
+ print(classification_report(y_test, y_pred))
+ # Feature importance
+ feature_importances = pd.DataFrame(model.feature_importances_,
+ index=X_train.columns,
+columns=['importance']).sort_values('importance', ascending=False)
+ # Identify important features
+ important_features = feature_importances[feature_importances['importance'] >= 
+0.04].index
+ # Return necessary data for odds ratio calculation
+ return y_test, X_test, y_pred, important_features
+# Define your datasets and subset names
+subset_names = ['50-50', '60-40', '10-90', '90-10']
+datasets = {
+ '50-50': 'Subset_50-50.csv',
+ '60-40': 'Subset_60-40.csv',
+ '10-90': 'Subset_10-90.csv',
+ '90-10': 'Subset_90-10.csv'
+id_column = 'ID'
+# Train and evaluate a Random Forest model for each subset
+for subset_name in subset_names:
+ data_path = datasets[subset_name]
+ y_test, X_test, y_pred, important_features = 
+train_random_forest_and_evaluate(data_path, id_column, subset_name)
+ print(f"Calculating odds ratios for subset {subset_name}...") # Debug print
+ print(f"Important features: {important_features}") # Debug print
+ # Calculate odds ratios for important features
+ for feature in important_features:
+ print(f"Processing feature: {feature}") # Debug print
+ if X_test[feature].nunique() == 2: # Ensure feature is binary
+ print(f"Calculating odds ratio for binary feature: {feature}") # Debug 
+print
+ odds_ratio, p_value = calculate_odds_ratio(y_test, X_test[feature])
+ print(f"Odds Ratio for {feature} in {subset_name}: {odds_ratio}, P-Value: 
+{p_value}")
+ else:
+ print(f"Skipping non-binary feature: {feature}") # Debug print
